@@ -746,6 +746,40 @@ docker system df
 
 ## 🔍 Troubleshooting
 
+### CUDA Device-Side Assertion Errors (Fixed in v2.0.3+)
+
+**Problem:** Users experiencing errors like:
+```
+CUDA error: device-side assert triggered
+Assertion `input[0] != 0` failed
+```
+
+**Solution:** This server now includes comprehensive CUDA error handling and recovery mechanisms:
+
+1. **Automatic Error Recovery:** The server automatically detects CUDA assertion failures and attempts recovery
+2. **Retry Mechanism:** Failed generations are retried up to 2 times with different parameters
+3. **CPU Fallback:** If CUDA consistently fails, the server can automatically fallback to CPU processing
+4. **Enhanced Debugging:** Detailed error logging and diagnostics help identify root causes
+
+**Configuration Options (in `config.yaml`):**
+```yaml
+debug:
+  enable_cuda_error_recovery: true      # Enable automatic CUDA error recovery
+  cuda_launch_blocking: false           # Enable CUDA_LAUNCH_BLOCKING for detailed errors
+  max_generation_retries: 2             # Maximum retry attempts on failure
+  fallback_to_cpu_on_cuda_error: true   # Auto-fallback to CPU on persistent CUDA errors
+  verbose_error_logging: true           # Enable detailed error diagnostics
+```
+
+**Manual Troubleshooting Steps:**
+1. **Update your installation:** Ensure you have the latest version with CUDA error handling
+2. **Enable detailed debugging:** Set `cuda_launch_blocking: true` in config.yaml for better error tracking
+3. **Check GPU memory:** Close other GPU applications and restart the server
+4. **Try CPU mode:** Set `device: cpu` in config.yaml to test if the issue is GPU-specific
+5. **Verify dependencies:** Ensure PyTorch and CUDA versions are compatible
+
+### General CUDA Issues
+
 *   **Apple Silicon (MPS) Issues:**
     *   **MPS Not Available:** Ensure you have macOS 12.3+ and an Apple Silicon Mac. Verify with `python -c "import torch; print(torch.backends.mps.is_available())"`
     *   **Installation Conflicts:** If you encounter version conflicts, follow the exact Apple Silicon installation sequence in Option 3, installing PyTorch first before other dependencies.

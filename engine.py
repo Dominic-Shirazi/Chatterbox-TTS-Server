@@ -5,6 +5,8 @@ import logging
 import random
 import numpy as np
 import torch
+import os
+import time
 from typing import Optional, Tuple
 from pathlib import Path
 
@@ -40,6 +42,107 @@ def set_seed(seed_value: int):
     random.seed(seed_value)
     np.random.seed(seed_value)
     logger.info(f"Global seed set to: {seed_value}")
+
+
+def _setup_cuda_debugging():
+    """
+    Sets up CUDA debugging environment if enabled in configuration.
+    """
+    if config_manager.get_bool("debug.cuda_launch_blocking", False):
+        os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+        logger.info("CUDA_LAUNCH_BLOCKING enabled for better error tracking")
+    
+    if config_manager.get_bool("debug.verbose_error_logging", True):
+        # Enable additional CUDA error context
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.set_per_process_memory_fraction(0.95)  # Leave some memory margin
+                logger.info("CUDA memory fraction set to 0.95 to prevent OOM errors")
+            except Exception as e:
+                logger.warning(f"Could not set CUDA memory fraction: {e}")
+
+
+def _clear_cuda_cache():
+    """
+    Clears CUDA cache to recover from potential memory issues.
+    """
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+        logger.info("CUDA cache cleared")
+
+
+def _validate_generation_inputs(text: str, audio_prompt_path: Optional[str]) -> bool:
+    """
+    Validates inputs before passing them to the model generation.
+    
+    Args:
+        text: The text to synthesize
+        audio_prompt_path: Path to audio prompt file
+        
+    Returns:
+        bool: True if inputs are valid, False otherwise
+    """
+    if not text or not text.strip():
+        logger.error("Text input is empty or contains only whitespace")
+        return False
+    
+    if len(text.strip()) > 10000:  # Reasonable limit
+        logger.warning(f"Text input is very long ({len(text)} characters), this may cause issues")
+    
+    if audio_prompt_path:
+        if not os.path.exists(audio_prompt_path):
+            logger.error(f"Audio prompt path does not exist: {audio_prompt_path}")
+            return False
+    
+    return True
+
+
+def _handle_cuda_error(error: Exception, retry_count: int) -> bool:
+    """
+    Handles CUDA-specific errors and determines if retry is appropriate.
+    
+    Args:
+        error: The exception that occurred
+        retry_count: Current retry attempt number
+        
+    Returns:
+        bool: True if retry should be attempted, False otherwise
+    """
+    error_str = str(error).lower()
+    
+    # Check for known CUDA assertion errors
+    if "device-side assert" in error_str or "assertion" in error_str:
+        logger.error(f"CUDA device-side assertion detected: {error}")
+        
+        if config_manager.get_bool("debug.enable_cuda_error_recovery", True):
+            logger.info("Attempting CUDA error recovery...")
+            _clear_cuda_cache()
+            
+            # Force synchronization to ensure error state is cleared
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.synchronize()
+                    logger.info("CUDA synchronization completed")
+                except Exception as sync_error:
+                    logger.error(f"CUDA synchronization failed: {sync_error}")
+                    return False
+            
+            return retry_count < config_manager.get_int("debug.max_generation_retries", 2)
+    
+    # Check for CUDA out of memory errors
+    elif "out of memory" in error_str or "cuda oom" in error_str:
+        logger.error(f"CUDA out of memory error: {error}")
+        _clear_cuda_cache()
+        return retry_count < config_manager.get_int("debug.max_generation_retries", 2)
+    
+    # Check for other CUDA runtime errors
+    elif "cuda" in error_str or "gpu" in error_str:
+        logger.error(f"CUDA runtime error: {error}")
+        _clear_cuda_cache()
+        return retry_count < config_manager.get_int("debug.max_generation_retries", 2)
+    
+    return False
 
 
 def _test_cuda_functionality() -> bool:
@@ -99,6 +202,9 @@ def load_model() -> bool:
         return True
 
     try:
+        # Setup CUDA debugging if enabled
+        _setup_cuda_debugging()
+        
         # Determine processing device with robust CUDA detection and intelligent fallback
         device_setting = config_manager.get_string("tts_engine.device", "auto")
 
@@ -216,7 +322,7 @@ def synthesize(
     seed: int = 0,
 ) -> Tuple[Optional[torch.Tensor], Optional[int]]:
     """
-    Synthesizes audio from text using the loaded TTS model.
+    Synthesizes audio from text using the loaded TTS model with robust error handling.
 
     Args:
         text: The text to synthesize.
@@ -231,42 +337,141 @@ def synthesize(
         A tuple containing the audio waveform (torch.Tensor) and the sample rate (int),
         or (None, None) if synthesis fails.
     """
-    global chatterbox_model
+    global chatterbox_model, model_device, MODEL_LOADED
 
     if not MODEL_LOADED or chatterbox_model is None:
         logger.error("TTS model is not loaded. Cannot synthesize audio.")
         return None, None
 
-    try:
-        # Set seed globally if a specific seed value is provided and is non-zero.
-        if seed != 0:
-            logger.info(f"Applying user-provided seed for generation: {seed}")
-            set_seed(seed)
-        else:
-            logger.info(
-                "Using default (potentially random) generation behavior as seed is 0."
+    # Validate inputs before proceeding
+    if not _validate_generation_inputs(text, audio_prompt_path):
+        logger.error("Input validation failed")
+        return None, None
+
+    max_retries = config_manager.get_int("debug.max_generation_retries", 2)
+    retry_count = 0
+    original_device = model_device
+    
+    while retry_count <= max_retries:
+        try:
+            # Set seed globally if a specific seed value is provided and is non-zero.
+            if seed != 0:
+                logger.info(f"Applying user-provided seed for generation: {seed}")
+                set_seed(seed)
+            else:
+                logger.info(
+                    "Using default (potentially random) generation behavior as seed is 0."
+                )
+
+            logger.debug(
+                f"Synthesizing with params (attempt {retry_count + 1}): audio_prompt='{audio_prompt_path}', temp={temperature}, "
+                f"exag={exaggeration}, cfg_weight={cfg_weight}, seed_applied_globally_if_nonzero={seed}, device={model_device}"
             )
 
-        logger.debug(
-            f"Synthesizing with params: audio_prompt='{audio_prompt_path}', temp={temperature}, "
-            f"exag={exaggeration}, cfg_weight={cfg_weight}, seed_applied_globally_if_nonzero={seed}"
-        )
+            # Pre-generation validation for CUDA
+            if model_device == "cuda" and torch.cuda.is_available():
+                try:
+                    # Check CUDA state before generation
+                    torch.cuda.synchronize()
+                    memory_allocated = torch.cuda.memory_allocated()
+                    memory_reserved = torch.cuda.memory_reserved()
+                    logger.debug(f"CUDA memory before generation: allocated={memory_allocated/1024**2:.1f}MB, reserved={memory_reserved/1024**2:.1f}MB")
+                except Exception as cuda_check_error:
+                    logger.warning(f"CUDA state check failed: {cuda_check_error}")
 
-        # Call the core model's generate method
-        wav_tensor = chatterbox_model.generate(
-            text=text,
-            audio_prompt_path=audio_prompt_path,
-            temperature=temperature,
-            exaggeration=exaggeration,
-            cfg_weight=cfg_weight,
-        )
+            # Call the core model's generate method with timeout protection
+            start_time = time.time()
+            
+            wav_tensor = chatterbox_model.generate(
+                text=text,
+                audio_prompt_path=audio_prompt_path,
+                temperature=temperature,
+                exaggeration=exaggeration,
+                cfg_weight=cfg_weight,
+            )
+            
+            generation_time = time.time() - start_time
+            logger.info(f"Generation completed successfully in {generation_time:.2f} seconds")
 
-        # The ChatterboxTTS.generate method already returns a CPU tensor.
-        return wav_tensor, chatterbox_model.sr
+            # Validate output tensor
+            if wav_tensor is None:
+                raise RuntimeError("Model generated None output")
+            
+            if not isinstance(wav_tensor, torch.Tensor):
+                raise RuntimeError(f"Model output is not a tensor: {type(wav_tensor)}")
+            
+            if wav_tensor.numel() == 0:
+                raise RuntimeError("Model generated empty tensor")
+            
+            # Check for NaN or infinite values
+            if torch.isnan(wav_tensor).any():
+                raise RuntimeError("Model generated tensor contains NaN values")
+            
+            if torch.isinf(wav_tensor).any():
+                raise RuntimeError("Model generated tensor contains infinite values")
 
-    except Exception as e:
-        logger.error(f"Error during TTS synthesis: {e}", exc_info=True)
-        return None, None
+            # The ChatterboxTTS.generate method already returns a CPU tensor.
+            logger.info(f"Synthesis successful - tensor shape: {wav_tensor.shape}, device: {wav_tensor.device}")
+            return wav_tensor, chatterbox_model.sr
+
+        except Exception as e:
+            error_message = str(e)
+            retry_count += 1
+            
+            if config_manager.get_bool("debug.verbose_error_logging", True):
+                logger.error(f"Error during TTS synthesis (attempt {retry_count}/{max_retries + 1}): {e}", exc_info=True)
+            else:
+                logger.error(f"Error during TTS synthesis (attempt {retry_count}/{max_retries + 1}): {e}")
+
+            # Handle CUDA-specific errors
+            if "cuda" in error_message.lower() or "gpu" in error_message.lower():
+                if _handle_cuda_error(e, retry_count - 1):
+                    logger.info(f"Retrying generation after CUDA error recovery (attempt {retry_count + 1})")
+                    
+                    # Add a small delay to allow GPU to stabilize
+                    time.sleep(0.5)
+                    continue
+                else:
+                    # Check if we should fallback to CPU
+                    if (config_manager.get_bool("debug.fallback_to_cpu_on_cuda_error", True) and 
+                        original_device != "cpu" and retry_count > max_retries // 2):
+                        
+                        logger.warning("Attempting CPU fallback after CUDA errors")
+                        try:
+                            # Reload model on CPU
+                            old_device_setting = config_manager.get_string("tts_engine.device", "auto")
+                            config_manager.data["tts_engine"]["device"] = "cpu"
+                            
+                            # Clear CUDA cache and reload
+                            _clear_cuda_cache()
+                            
+                            MODEL_LOADED = False
+                            chatterbox_model = None
+                            
+                            if load_model():
+                                logger.info("Successfully reloaded model on CPU for fallback")
+                                model_device = "cpu"
+                                continue
+                            else:
+                                logger.error("Failed to reload model on CPU")
+                                # Restore original device setting
+                                config_manager.data["tts_engine"]["device"] = old_device_setting
+                                
+                        except Exception as fallback_error:
+                            logger.error(f"CPU fallback failed: {fallback_error}")
+                            # Restore original device setting
+                            config_manager.data["tts_engine"]["device"] = old_device_setting
+            
+            # For non-CUDA errors or if retries exhausted
+            if retry_count > max_retries:
+                logger.error(f"Synthesis failed after {max_retries + 1} attempts")
+                break
+            else:
+                logger.info(f"Retrying generation (attempt {retry_count + 1})")
+                time.sleep(0.1)  # Brief pause between retries
+
+    logger.error("All synthesis attempts failed")
+    return None, None
 
 
 # --- End File: engine.py ---
