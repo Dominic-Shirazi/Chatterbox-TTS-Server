@@ -51,3 +51,9 @@ ui:
   max_predefined_voices_in_dropdown: 50
 debug:
   save_intermediate_audio: false
+  enable_cuda_error_recovery: true
+  cuda_launch_blocking: false
+  max_generation_retries: 2
+  fallback_to_cpu_on_cuda_error: true
+  verbose_error_logging: true
+  force_cuda_debugging_mode: false
