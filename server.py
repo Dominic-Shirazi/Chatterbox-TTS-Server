@@ -181,7 +181,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=get_ui_title(),
     description="Text-to-Speech server with advanced UI and API capabilities.",
-    version="2.0.2",  # Version Bump
+    version="2.0.3",  # Version Bump - Added CUDA error handling and recovery
     lifespan=lifespan,
 )
 

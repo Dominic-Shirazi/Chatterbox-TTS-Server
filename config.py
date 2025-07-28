@@ -101,7 +101,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "max_predefined_voices_in_dropdown": 20,  # Max predefined voices to list in UI dropdown.
     },
     "debug": {  # Settings for debugging purposes
-        "save_intermediate_audio": False  # If true, save intermediate audio files for debugging
+        "save_intermediate_audio": False,  # If true, save intermediate audio files for debugging
+        "enable_cuda_error_recovery": True,  # Enable automatic recovery from CUDA errors
+        "cuda_launch_blocking": False,  # Enable CUDA_LAUNCH_BLOCKING for better error tracking
+        "max_generation_retries": 2,  # Maximum number of generation retries on failure
+        "fallback_to_cpu_on_cuda_error": True,  # Automatically fallback to CPU if CUDA fails
+        "verbose_error_logging": True,  # Enable detailed error logging and diagnostics
     },
 }
 
