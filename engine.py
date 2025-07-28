@@ -547,7 +547,7 @@ def synthesize(
                         try:
                             # Reload model on CPU without attempting CUDA operations
                             old_device_setting = config_manager.get_string("tts_engine.device", "auto")
-                            config_manager.data["tts_engine"]["device"] = "cpu"
+                            config_manager.config["tts_engine"]["device"] = "cpu"
                             
                             # Safe CUDA cache clearing (will handle assertion errors gracefully)
                             _clear_cuda_cache()
@@ -564,12 +564,12 @@ def synthesize(
                             else:
                                 logger.error("Failed to reload model on CPU after device-side assertion")
                                 # Restore original device setting
-                                config_manager.data["tts_engine"]["device"] = old_device_setting
+                                config_manager.config["tts_engine"]["device"] = old_device_setting
                                 
                         except Exception as fallback_error:
                             logger.error(f"CPU fallback failed after device-side assertion: {fallback_error}")
                             # Restore original device setting
-                            config_manager.data["tts_engine"]["device"] = old_device_setting
+                            config_manager.config["tts_engine"]["device"] = old_device_setting
                         
                         # If CPU fallback failed, don't retry with CUDA in assertion state
                         logger.error("Cannot recover from device-side assertion - stopping generation attempts")
@@ -591,7 +591,7 @@ def synthesize(
                             try:
                                 # Reload model on CPU
                                 old_device_setting = config_manager.get_string("tts_engine.device", "auto")
-                                config_manager.data["tts_engine"]["device"] = "cpu"
+                                config_manager.config["tts_engine"]["device"] = "cpu"
                                 
                                 # Clear CUDA cache and reload
                                 _clear_cuda_cache()
@@ -606,12 +606,12 @@ def synthesize(
                                 else:
                                     logger.error("Failed to reload model on CPU")
                                     # Restore original device setting
-                                    config_manager.data["tts_engine"]["device"] = old_device_setting
+                                    config_manager.config["tts_engine"]["device"] = old_device_setting
                                     
                             except Exception as fallback_error:
                                 logger.error(f"CPU fallback failed: {fallback_error}")
                                 # Restore original device setting
-                                config_manager.data["tts_engine"]["device"] = old_device_setting
+                                config_manager.config["tts_engine"]["device"] = old_device_setting
             
             # For non-CUDA errors or if retries exhausted
             if retry_count > max_retries:
