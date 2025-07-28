@@ -32,16 +32,35 @@ def set_seed(seed_value: int):
     """
     Sets the seed for torch, random, and numpy for reproducibility.
     This is called if a non-zero seed is provided for generation.
+    Uses safe error handling to avoid cascading CUDA failures.
     """
-    torch.manual_seed(seed_value)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed_value)
-        torch.cuda.manual_seed_all(seed_value)  # if using multi-GPU
-    if torch.backends.mps.is_available():
-        torch.mps.manual_seed(seed_value)
-    random.seed(seed_value)
-    np.random.seed(seed_value)
-    logger.info(f"Global seed set to: {seed_value}")
+    try:
+        torch.manual_seed(seed_value)
+        
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.manual_seed(seed_value)
+                torch.cuda.manual_seed_all(seed_value)  # if using multi-GPU
+            except RuntimeError as e:
+                error_str = str(e).lower()
+                if "device-side assert" in error_str or "assertion" in error_str:
+                    logger.warning(f"Cannot set CUDA seed due to device-side assertion: {e}")
+                else:
+                    logger.warning(f"CUDA seed setting failed: {e}")
+        
+        if torch.backends.mps.is_available():
+            try:
+                torch.mps.manual_seed(seed_value)
+            except Exception as e:
+                logger.warning(f"MPS seed setting failed: {e}")
+        
+        random.seed(seed_value)
+        np.random.seed(seed_value)
+        logger.info(f"Global seed set to: {seed_value}")
+        
+    except Exception as e:
+        logger.error(f"Failed to set global seed: {e}")
+        # Don't raise exception, just log the error and continue
 
 
 def _setup_cuda_debugging():
@@ -65,11 +84,23 @@ def _setup_cuda_debugging():
 def _clear_cuda_cache():
     """
     Clears CUDA cache to recover from potential memory issues.
+    Uses safe error handling to avoid cascading CUDA failures.
     """
-    if torch.cuda.is_available():
+    if not torch.cuda.is_available():
+        return
+    
+    try:
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
-        logger.info("CUDA cache cleared")
+        logger.info("CUDA cache cleared successfully")
+    except RuntimeError as e:
+        error_str = str(e).lower()
+        if "device-side assert" in error_str or "assertion" in error_str:
+            logger.warning("Cannot clear CUDA cache due to device-side assertion - CUDA device in error state")
+        else:
+            logger.warning(f"CUDA cache clearing failed: {e}")
+    except Exception as e:
+        logger.warning(f"Unexpected error clearing CUDA cache: {e}")
 
 
 def _validate_generation_inputs(text: str, audio_prompt_path: Optional[str]) -> bool:
@@ -87,15 +118,72 @@ def _validate_generation_inputs(text: str, audio_prompt_path: Optional[str]) -> 
         logger.error("Text input is empty or contains only whitespace")
         return False
     
-    if len(text.strip()) > 10000:  # Reasonable limit
-        logger.warning(f"Text input is very long ({len(text)} characters), this may cause issues")
+    # Clean and normalize the text
+    text_clean = text.strip()
     
+    # Check for reasonable text length
+    if len(text_clean) > 10000:  # Reasonable limit
+        logger.warning(f"Text input is very long ({len(text_clean)} characters), this may cause issues")
+    
+    # Check for minimum meaningful text length
+    if len(text_clean) < 1:
+        logger.error("Text input is too short to generate meaningful audio")
+        return False
+    
+    # Validate text contains some alphanumeric characters
+    import re
+    if not re.search(r'[a-zA-Z0-9]', text_clean):
+        logger.error("Text input contains no alphanumeric characters")
+        return False
+    
+    # Validate audio prompt path if provided
     if audio_prompt_path:
         if not os.path.exists(audio_prompt_path):
             logger.error(f"Audio prompt path does not exist: {audio_prompt_path}")
             return False
+        
+        # Check file size is reasonable
+        try:
+            file_size = os.path.getsize(audio_prompt_path)
+            if file_size == 0:
+                logger.error(f"Audio prompt file is empty: {audio_prompt_path}")
+                return False
+            if file_size > 100 * 1024 * 1024:  # 100MB limit
+                logger.warning(f"Audio prompt file is very large ({file_size / 1024 / 1024:.1f}MB): {audio_prompt_path}")
+        except OSError as e:
+            logger.error(f"Cannot access audio prompt file: {audio_prompt_path}, error: {e}")
+            return False
     
     return True
+
+
+def _validate_cuda_state() -> bool:
+    """
+    Validates that CUDA is in a working state before attempting generation.
+    
+    Returns:
+        bool: True if CUDA is working or not being used, False if CUDA is in error state
+    """
+    if not torch.cuda.is_available():
+        return True  # CPU mode is fine
+    
+    try:
+        # Test basic CUDA operations
+        test_tensor = torch.tensor([1.0], device='cuda')
+        test_result = test_tensor + 1.0
+        test_result.cpu()  # Move back to CPU
+        return True
+    except RuntimeError as e:
+        error_str = str(e).lower()
+        if "device-side assert" in error_str or "assertion" in error_str:
+            logger.error("CUDA device is in assertion error state - cannot proceed with CUDA operations")
+            return False
+        else:
+            logger.warning(f"CUDA functionality test failed: {e}")
+            return False
+    except Exception as e:
+        logger.warning(f"Unexpected error testing CUDA state: {e}")
+        return False
 
 
 def _handle_cuda_error(error: Exception, retry_count: int) -> bool:
@@ -111,24 +199,24 @@ def _handle_cuda_error(error: Exception, retry_count: int) -> bool:
     """
     error_str = str(error).lower()
     
-    # Check for known CUDA assertion errors
+    # Check for known CUDA assertion errors - these are critical and require special handling
     if "device-side assert" in error_str or "assertion" in error_str:
         logger.error(f"CUDA device-side assertion detected: {error}")
         
         if config_manager.get_bool("debug.enable_cuda_error_recovery", True):
-            logger.info("Attempting CUDA error recovery...")
+            logger.info("Attempting CUDA error recovery for device-side assertion...")
+            
+            # For device-side assertions, we cannot safely use most CUDA operations
+            # Try safe cache clearing first
             _clear_cuda_cache()
             
-            # Force synchronization to ensure error state is cleared
-            if torch.cuda.is_available():
-                try:
-                    torch.cuda.synchronize()
-                    logger.info("CUDA synchronization completed")
-                except Exception as sync_error:
-                    logger.error(f"CUDA synchronization failed: {sync_error}")
-                    return False
+            # Skip CUDA synchronization if it's likely to fail due to assertion state
+            # Device-side assertions often leave CUDA in an unrecoverable state
+            logger.warning("Device-side assertion detected - CUDA device may be in unstable state")
             
-            return retry_count < config_manager.get_int("debug.max_generation_retries", 2)
+            # For device-side assertions, be more conservative with retries
+            max_retries = max(1, config_manager.get_int("debug.max_generation_retries", 2) // 2)
+            return retry_count < max_retries
     
     # Check for CUDA out of memory errors
     elif "out of memory" in error_str or "cuda oom" in error_str:
@@ -140,6 +228,15 @@ def _handle_cuda_error(error: Exception, retry_count: int) -> bool:
     elif "cuda" in error_str or "gpu" in error_str:
         logger.error(f"CUDA runtime error: {error}")
         _clear_cuda_cache()
+        
+        # Try CUDA synchronization for non-assertion errors
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.synchronize()
+                logger.info("CUDA synchronization completed")
+            except Exception as sync_error:
+                logger.warning(f"CUDA synchronization failed: {sync_error}")
+        
         return retry_count < config_manager.get_int("debug.max_generation_retries", 2)
     
     return False
@@ -354,6 +451,27 @@ def synthesize(
     
     while retry_count <= max_retries:
         try:
+            # Pre-generation CUDA state validation for device-side assertion detection
+            if model_device == "cuda" and torch.cuda.is_available():
+                if not _validate_cuda_state():
+                    logger.error("CUDA device is in error state, cannot proceed with CUDA generation")
+                    # If we're on CUDA and it's in error state, trigger CPU fallback
+                    raise RuntimeError("CUDA device-side assertion state detected")
+                
+                try:
+                    # Check CUDA state before generation
+                    torch.cuda.synchronize()
+                    memory_allocated = torch.cuda.memory_allocated()
+                    memory_reserved = torch.cuda.memory_reserved()
+                    logger.debug(f"CUDA memory before generation: allocated={memory_allocated/1024**2:.1f}MB, reserved={memory_reserved/1024**2:.1f}MB")
+                except Exception as cuda_check_error:
+                    error_str = str(cuda_check_error).lower()
+                    if "device-side assert" in error_str or "assertion" in error_str:
+                        logger.error("CUDA device-side assertion detected during pre-check")
+                        raise RuntimeError("CUDA device-side assertion state detected")
+                    else:
+                        logger.warning(f"CUDA state check failed: {cuda_check_error}")
+
             # Set seed globally if a specific seed value is provided and is non-zero.
             if seed != 0:
                 logger.info(f"Applying user-provided seed for generation: {seed}")
@@ -367,17 +485,6 @@ def synthesize(
                 f"Synthesizing with params (attempt {retry_count + 1}): audio_prompt='{audio_prompt_path}', temp={temperature}, "
                 f"exag={exaggeration}, cfg_weight={cfg_weight}, seed_applied_globally_if_nonzero={seed}, device={model_device}"
             )
-
-            # Pre-generation validation for CUDA
-            if model_device == "cuda" and torch.cuda.is_available():
-                try:
-                    # Check CUDA state before generation
-                    torch.cuda.synchronize()
-                    memory_allocated = torch.cuda.memory_allocated()
-                    memory_reserved = torch.cuda.memory_reserved()
-                    logger.debug(f"CUDA memory before generation: allocated={memory_allocated/1024**2:.1f}MB, reserved={memory_reserved/1024**2:.1f}MB")
-                except Exception as cuda_check_error:
-                    logger.warning(f"CUDA state check failed: {cuda_check_error}")
 
             # Call the core model's generate method with timeout protection
             start_time = time.time()
@@ -423,44 +530,88 @@ def synthesize(
             else:
                 logger.error(f"Error during TTS synthesis (attempt {retry_count}/{max_retries + 1}): {e}")
 
-            # Handle CUDA-specific errors
+            # Handle CUDA-specific errors with enhanced device-side assertion handling
             if "cuda" in error_message.lower() or "gpu" in error_message.lower():
-                if _handle_cuda_error(e, retry_count - 1):
-                    logger.info(f"Retrying generation after CUDA error recovery (attempt {retry_count + 1})")
+                # Detect device-side assertion errors specifically 
+                is_device_assertion = ("device-side assert" in error_message.lower() or 
+                                     "assertion" in error_message.lower())
+                
+                if is_device_assertion:
+                    logger.error("Device-side assertion error detected - CUDA device is in critical error state")
                     
-                    # Add a small delay to allow GPU to stabilize
-                    time.sleep(0.5)
-                    continue
-                else:
-                    # Check if we should fallback to CPU
+                    # For device-side assertions, immediately attempt CPU fallback if enabled
                     if (config_manager.get_bool("debug.fallback_to_cpu_on_cuda_error", True) and 
-                        original_device != "cpu" and retry_count > max_retries // 2):
+                        original_device != "cpu"):
+                        logger.warning("Device-side assertion detected - attempting immediate CPU fallback")
                         
-                        logger.warning("Attempting CPU fallback after CUDA errors")
                         try:
-                            # Reload model on CPU
+                            # Reload model on CPU without attempting CUDA operations
                             old_device_setting = config_manager.get_string("tts_engine.device", "auto")
                             config_manager.data["tts_engine"]["device"] = "cpu"
                             
-                            # Clear CUDA cache and reload
+                            # Safe CUDA cache clearing (will handle assertion errors gracefully)
                             _clear_cuda_cache()
                             
                             MODEL_LOADED = False
                             chatterbox_model = None
                             
                             if load_model():
-                                logger.info("Successfully reloaded model on CPU for fallback")
+                                logger.info("Successfully reloaded model on CPU after device-side assertion")
                                 model_device = "cpu"
+                                # Reset retry count for CPU attempt
+                                retry_count = 0
                                 continue
                             else:
-                                logger.error("Failed to reload model on CPU")
+                                logger.error("Failed to reload model on CPU after device-side assertion")
                                 # Restore original device setting
                                 config_manager.data["tts_engine"]["device"] = old_device_setting
                                 
                         except Exception as fallback_error:
-                            logger.error(f"CPU fallback failed: {fallback_error}")
+                            logger.error(f"CPU fallback failed after device-side assertion: {fallback_error}")
                             # Restore original device setting
                             config_manager.data["tts_engine"]["device"] = old_device_setting
+                        
+                        # If CPU fallback failed, don't retry with CUDA in assertion state
+                        logger.error("Cannot recover from device-side assertion - stopping generation attempts")
+                        break
+                else:
+                    # Handle other CUDA errors with normal retry logic
+                    if _handle_cuda_error(e, retry_count - 1):
+                        logger.info(f"Retrying generation after CUDA error recovery (attempt {retry_count + 1})")
+                        
+                        # Add a small delay to allow GPU to stabilize
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        # Check if we should fallback to CPU for persistent non-assertion errors
+                        if (config_manager.get_bool("debug.fallback_to_cpu_on_cuda_error", True) and 
+                            original_device != "cpu" and retry_count > max_retries // 2):
+                            
+                            logger.warning("Attempting CPU fallback after persistent CUDA errors")
+                            try:
+                                # Reload model on CPU
+                                old_device_setting = config_manager.get_string("tts_engine.device", "auto")
+                                config_manager.data["tts_engine"]["device"] = "cpu"
+                                
+                                # Clear CUDA cache and reload
+                                _clear_cuda_cache()
+                                
+                                MODEL_LOADED = False
+                                chatterbox_model = None
+                                
+                                if load_model():
+                                    logger.info("Successfully reloaded model on CPU for fallback")
+                                    model_device = "cpu"
+                                    continue
+                                else:
+                                    logger.error("Failed to reload model on CPU")
+                                    # Restore original device setting
+                                    config_manager.data["tts_engine"]["device"] = old_device_setting
+                                    
+                            except Exception as fallback_error:
+                                logger.error(f"CPU fallback failed: {fallback_error}")
+                                # Restore original device setting
+                                config_manager.data["tts_engine"]["device"] = old_device_setting
             
             # For non-CUDA errors or if retries exhausted
             if retry_count > max_retries:
