@@ -1,12 +1,12 @@
 # Chatterbox TTS Server: OpenAI-Compatible API with Web UI, Large Text Handling & Built-in Voices
 
-**Self-host the powerful [Chatterbox TTS model](https://github.com/resemble-ai/chatterbox) with this enhanced FastAPI server! Features an intuitive Web UI, a flexible API endpoint, voice cloning, large text processing via intelligent chunking, audiobook generation, and consistent, reproducible voices using built-in ready-to-use voices and a generation seed feature.**
+**Self-host Resemble AI's [Chatterbox](https://github.com/resemble-ai/chatterbox) open-source TTS family (Original + Chatterbox‑Turbo) behind an OpenAI‑compatible API and a modern Web UI. Chatterbox‑Turbo is a streamlined 350M-parameter model with dramatically improved throughput and native paralinguistic tags like `[laugh]`, `[cough]`, and `[chuckle]` for more expressive voice agents and narration. Features voice cloning, large text processing via intelligent chunking, audiobook generation, and consistent, reproducible voices using built-in ready-to-use voices and a generation seed feature.**
 
-> 🚀 **Try it now!** Test the full TTS server with voice cloning and audiobook generation in Google Colab - no installation required!
+> 🚀 **Try it now!** Test the full TTS server with voice cloning and audiobook generation in Google Colab - no installation required! To use it, please run cells 1 through 4 one at a time. After running cell 4, click on the "https://localhost:8004" link that appears in the output, and your web browser will open the UI from the .colab.dev domain. Read the instructions [here](https://github.com/devnen/Chatterbox-TTS-Server/blob/main/README_Colab.md).
 > 
 > [![Open Live Demo](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/devnen/Chatterbox-TTS-Server/blob/main/Chatterbox_TTS_Colab_Demo.ipynb)
 
-This server is based on the architecture and UI of our [Dia-TTS-Server](https://github.com/devnen/Dia-TTS-Server) project but uses the distinct `chatterbox-tts` engine. Runs accelerated on NVIDIA (CUDA), AMD (ROCm), and Apple Silicon (MPS) GPUs, with a fallback to CPU.
+This server is based on the architecture and UI of our [Dia-TTS-Server](https://github.com/devnen/Dia-TTS-Server) project but uses the distinct `chatterbox-tts` engine. Runs accelerated on NVIDIA (CUDA), AMD (ROCm), and Apple Silicon (MPS) GPUs, with a fallback to CPU. Make sure you also check our [Kitten-TTS-Server](https://github.com/devnen/Kitten-TTS-Server) project.
 
 [![Project Link](https://img.shields.io/badge/GitHub-devnen/Chatterbox--TTS--Server-blue?style=for-the-badge&logo=github)](https://github.com/devnen/Chatterbox-TTS-Server)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
@@ -28,6 +28,44 @@ This server is based on the architecture and UI of our [Dia-TTS-Server](https://
 
 ---
 
+## 🆕 What's New
+
+### ⚡ Chatterbox‑Turbo support (new)
+
+- Added full support for **Chatterbox‑Turbo**, Resemble AI's latest efficiency-focused Chatterbox model.
+- Turbo is built on a **streamlined 350M‑parameter architecture**, designed to use less compute/VRAM while keeping high-fidelity output.
+- Turbo distills the speech-token-to-mel "audio diffusion decoder" from **10 steps → 1 step**, removing a major inference bottleneck.
+- Resemble positions Turbo for real-time/agent workflows and highlights significantly faster-than-real-time performance on GPU (performance varies by hardware/settings).
+
+### 🔁 Hot‑swappable TTS engines (UI)
+
+- Added a new **engine selector** dropdown at the top of the Web UI.
+- Instantly hot-swap between **Original Chatterbox** and **Chatterbox‑Turbo**; the backend auto-loads the selected engine.
+- All UI + API requests route through the active engine so you can A/B test quality vs latency without changing client code.
+
+### 🎭 Paralinguistic tags (Turbo)
+
+- Turbo adds **native paralinguistic tags** you can write directly into your text, e.g. `…calling you back [chuckle]…`.
+- Supported tags include `[laugh]`, `[cough]`, and `[chuckle]`, plus text-based prompting for reactions like sigh, gasp, and cough.
+- Added **new presets** in `ui/presets.yaml` demonstrating paralinguistic prompting for agent-style scripts and expressive reads.
+
+### ✅ Original Chatterbox remains first‑class
+
+- The original Chatterbox model remains available, with support for high quality English language output, a **0.5B LLaMA backbone**, **emotion exaggeration control**, and training on **0.5M hours** of cleaned data.
+
+### 🖥️ New NVIDIA / CUDA support
+
+- Updated to support **NVIDIA CUDA 12.8** and **RTX 5090 / Blackwell** generation GPUs.
+
+### 🧰 Automated launcher + easy updates
+
+- New **Automated Launcher** (Windows + Linux) that creates/activates a venv, installs the right dependencies, downloads model files, starts the server, and opens the Web UI.
+- Easy maintenance commands:
+  - `--upgrade` to update code + dependencies.
+  - `--reinstall` for a clean reinstall when environments get messy.
+
+---
+
 ## 🗣️ Overview: Enhanced Chatterbox TTS Generation
 
 The [Chatterbox TTS model by Resemble AI](https://github.com/resemble-ai/chatterbox) provides capabilities for generating high-quality speech. This project builds upon that foundation by providing a robust [FastAPI](https://fastapi.tiangolo.com/) server that makes Chatterbox significantly easier to use and integrate.
@@ -37,6 +75,9 @@ The [Chatterbox TTS model by Resemble AI](https://github.com/resemble-ai/chatter
 The server expects plain text input for synthesis and we solve the complexity of setting up and running the model by offering:
 
 *   A **modern Web UI** for easy experimentation, preset loading, reference audio management, and generation parameter tuning.
+*   **Multi-engine support (Original + Turbo):** Choose the TTS engine directly in the Web UI, then generate via the same UI/API surface.
+*   **Paralinguistic prompting (Turbo):** Native tags like `[laugh]`, `[cough]`, and `[chuckle]` for natural non-speech reactions inside the same generated voice.
+*   **Original Chatterbox strengths:** High quality English output plus unique "emotion exaggeration control" and 0.5B LLaMA backbone.
 *   **Multi-Platform Acceleration:** Full support for **NVIDIA (CUDA)**, **AMD (ROCm)**, and **Apple Silicon (MPS)** GPUs, with an automatic fallback to **CPU**, ensuring you can run on any hardware.
 *   **Large Text Handling:** Intelligently splits long plain text inputs into manageable chunks based on sentence structure, processes them sequentially, and seamlessly concatenates the audio.
 *   **📚 Audiobook Generation:** Perfect for creating complete audiobooks - simply paste an entire book's text and the server automatically processes it into a single, seamless audio file with consistent voice quality throughout.
@@ -56,6 +97,13 @@ This server application enhances the underlying `chatterbox-tts` engine with the
 
 **🚀 Core Functionality:**
 
+*   **Multi-Engine Support:**
+    *   Choose between **Original Chatterbox** and **Chatterbox‑Turbo** via a hot-swappable engine selector in the Web UI.
+    *   Turbo offers significantly faster inference with a streamlined 350M-parameter architecture.
+    *   Original Chatterbox provides multilingual support (23 languages) and emotion exaggeration control.
+*   **Paralinguistic Tags (Turbo):**
+    *   Write native tags like `[laugh]`, `[cough]`, and `[chuckle]` directly in your text when using Chatterbox‑Turbo.
+    *   New presets demonstrate paralinguistic prompting for agent-style scripts and expressive narration.
 *   **Large Text Processing (Chunking):**
     *   Automatically handles long plain text inputs by intelligently splitting them into smaller chunks based on sentence boundaries.
     *   Processes each chunk individually and seamlessly concatenates the resulting audio, overcoming potential generation limits of the TTS engine.
@@ -79,6 +127,12 @@ This server application enhances the underlying `chatterbox-tts` engine with the
 
 **🔧 General Enhancements:**
 
+*   **Easy Installation & Management:**
+    *   🚀 **Automated Launcher** (`start.bat` / `start.sh`) - One-command setup with automatic hardware detection
+    *   🔧 **Multiple GPU Support** - NVIDIA CUDA 12.1, NVIDIA CUDA 12.8 (Blackwell), AMD ROCm, Apple MPS
+    *   🔄 **Easy Updates** - Simple `--upgrade` and `--reinstall` commands
+    *   📦 **Isolated Environment** - Automatic virtual environment management
+    *   🎯 **Skip Menu Options** - Direct installation with `--cpu`, `--nvidia`, `--nvidia-cu128`, `--rocm` flags
 *   **Performance:** Optimized for speed and efficient VRAM usage on GPU.
 *   **Web Interface:** Modern, responsive UI for plain text input, parameter adjustment, preset loading, reference/predefined audio management, and audio playback.
 *   **Model Loading:** Uses `ChatterboxTTS.from_pretrained()` for robust model loading from Hugging Face Hub, utilizing the standard HF cache.
@@ -90,12 +144,16 @@ This server application enhances the underlying `chatterbox-tts` engine with the
 *   **Core Chatterbox Capabilities (via [Resemble AI Chatterbox](https://github.com/resemble-ai/chatterbox)):**
     *   🗣️ High-quality single-speaker voice synthesis from plain text.
     *   🎤 Perform voice cloning using reference audio prompts.
+    *   ⚡ **Chatterbox‑Turbo** for significantly faster inference with paralinguistic tag support.
+    *   🌍 **Original Chatterbox** with high quality English output and emotion exaggeration control.
 *   **Enhanced Server & API:**
     *   ⚡ Built with the high-performance **[FastAPI](https://fastapi.tiangolo.com/)** framework.
     *   ⚙️ **Custom API Endpoint** (`/tts`) as the primary method for programmatic generation, exposing all key parameters.
     *   📄 Interactive API documentation via Swagger UI (`/docs`).
     *   🩺 Health check endpoint (`/api/ui/initial-data` also serves as a comprehensive status check).
 *   **Advanced Generation Features:**
+    *   🔁 **Hot-Swappable Engines:** Switch between Original Chatterbox and Chatterbox‑Turbo directly in the Web UI.
+    *   🎭 **Paralinguistic Tags (Turbo):** Native support for `[laugh]`, `[cough]`, `[chuckle]` and other expressive tags.
     *   📚 **Large Text Handling:** Intelligently splits long plain text inputs into chunks based on sentences, generates audio for each, and concatenates the results seamlessly. Configurable via `split_text` and `chunk_size`.
     *   📖 **Audiobook Creation:** Perfect for generating complete audiobooks from full-length texts with consistent voice quality and automatic chapter handling.
     *   🎤 **Predefined Voices:** Select from curated synthetic voices in the `./voices` directory.
@@ -104,6 +162,7 @@ This server application enhances the underlying `chatterbox-tts` engine with the
     *   🔇 **Audio Post-Processing:** Optional automatic steps to trim silence, fix internal pauses, and remove long unvoiced segments/artifacts (configurable via `config.yaml`).
 *   **Intuitive Web User Interface:**
     *   🖱️ Modern, easy-to-use interface.
+    *   🔁 **Engine Selector:** Hot-swap between Original Chatterbox and Chatterbox‑Turbo.
     *   💡 **Presets:** Load example text and settings dynamically from `ui/presets.yaml`.
     *   🎤 **Reference/Predefined Audio Upload:** Easily upload `.wav`/`.mp3` files.
     *   🗣️ **Voice Mode Selection:** Choose between Predefined Voices or Voice Cloning.
@@ -135,25 +194,147 @@ This server application enhances the underlying `chatterbox-tts` engine with the
 *   **Python:** Version 3.10 or later ([Download](https://www.python.org/downloads/)).
 *   **Git:** For cloning the repository ([Download](https://git-scm.com/downloads)).
 *   **Internet:** For downloading dependencies and models from Hugging Face Hub.
+*   **Disk Space:** 10GB+ recommended (for dependencies and model cache).
 *   **(Optional but HIGHLY Recommended for Performance):**
-    *   **NVIDIA GPU:** CUDA-compatible (Maxwell architecture or newer). Check [NVIDIA CUDA GPUs](https://developer.nvidia.com/cuda-gpus).
+    *   **NVIDIA GPU (CUDA 12.1):** CUDA-compatible (Maxwell architecture or newer, RTX 20/30/40 series). Check [NVIDIA CUDA GPUs](https://developer.nvidia.com/cuda-gpus).
+    *   **NVIDIA GPU (CUDA 12.8):** RTX 5090 or other Blackwell-based GPUs, driver version 570+.
     *   **NVIDIA Drivers:** Latest version for your GPU/OS ([Download](https://www.nvidia.com/Download/index.aspx)).
     *   **AMD GPU:** ROCm-compatible (e.g., RX 6000/7000 series). Check [AMD ROCm GPUs](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html).
-    *   **AMD Drivers:** Latest ROCm-compatible drivers for your GPU/OS.
-    *   **Apple Silicon:** M1, M2, M3, or newer Apple Silicon chips with macOS 12.3+ for MPS acceleration.
+    *   **AMD Drivers:** Latest ROCm-compatible drivers for your GPU/OS (Linux only).
+    *   **Apple Silicon:** M1, M2, M3, M4, or newer Apple Silicon chips with macOS 12.3+ for MPS acceleration.
 *   **(Linux Only):**
     *   `libsndfile1`: Audio library needed by `soundfile`. Install via package manager (e.g., `sudo apt install libsndfile1`).
     *   `ffmpeg`: For robust audio operations (optional but recommended). Install via package manager (e.g., `sudo apt install ffmpeg`).
 
+### Hardware Compatibility Matrix
+
+| Hardware | Installation Option | Requirements File | Driver Requirement |
+|----------|--------------------|--------------------|-------------------|
+| CPU Only | `--cpu` | requirements.txt | None |
+| NVIDIA RTX 20/30/40 | `--nvidia` | requirements-nvidia.txt | 525+ |
+| NVIDIA RTX 5090 / Blackwell | `--nvidia-cu128` | requirements-nvidia-cu128.txt | 570+ |
+| AMD RX 6000/7000 (Linux) | `--rocm` | requirements-rocm.txt | ROCm 6.4+ |
+| Apple Silicon (M1/M2/M3/M4) | Manual install | See Option 4 | macOS 12.3+ |
+
+---
+
 ## 💻 Installation and Setup
 
-This project uses specific dependency files to ensure a smooth, one-command installation for your hardware. Follow the path that matches your system.
+This project uses specific dependency files to ensure a smooth installation for your hardware. You can choose between the **automated launcher** (recommended for most users) or **manual installation** (for advanced users).
 
 **1. Clone the Repository**
 ```bash
 git clone https://github.com/devnen/Chatterbox-TTS-Server.git
 cd Chatterbox-TTS-Server
 ```
+
+---
+
+### 🚀 Quick Start with Automated Launcher (Recommended)
+
+The automated launcher handles virtual environment creation, hardware detection, dependency installation, and server startup - all in one step.
+
+#### Windows
+
+```bash
+# Double-click start.bat or run from command prompt:
+start.bat
+```
+
+#### Linux / macOS
+
+```bash
+# Make the launcher executable and run it
+chmod +x start.sh
+./start.sh
+```
+
+#### What Happens
+
+1. The launcher checks your Python installation (3.10+ required)
+2. Creates a virtual environment automatically
+3. Detects your GPU hardware (NVIDIA, AMD, or CPU-only)
+4. Shows an installation menu with recommended option pre-selected:
+
+```
+══════════════════════════════════════════════════════════════
+   Hardware Detection
+══════════════════════════════════════════════════════════════
+
+   NVIDIA GPU: Detected (NVIDIA GeForce RTX 4090)
+   AMD GPU:    Not detected
+
+══════════════════════════════════════════════════════════════
+   Select Installation Type
+══════════════════════════════════════════════════════════════
+
+   [1] CPU Only
+       No GPU acceleration - works on any system
+
+   [2] NVIDIA GPU (CUDA 12.1) [DEFAULT]
+       Standard for RTX 20/30/40 series
+
+   [3] NVIDIA GPU (CUDA 12.8)
+       For RTX 5090 / Blackwell GPUs only
+
+   [4] AMD GPU (ROCm 6.4)
+       For AMD GPUs on Linux
+
+   Enter choice [2]: 
+```
+
+5. Press **Enter** to accept the recommended default, or type a number to select a different option
+6. Dependencies are installed automatically (this may take several minutes on first run)
+7. The server starts and displays the access URLs
+
+#### Launcher Command-Line Options
+
+| Option | Description |
+|--------|-------------|
+| `--reinstall` or `-r` | Remove existing installation and reinstall fresh (shows menu) |
+| `--upgrade` or `-u` | Upgrade to latest version (keeps current hardware selection) |
+| `--cpu` | Install CPU-only version (skip menu) |
+| `--nvidia` | Install NVIDIA CUDA 12.1 version (skip menu) |
+| `--nvidia-cu128` | Install NVIDIA CUDA 12.8 version for RTX 5090/Blackwell (skip menu) |
+| `--rocm` | Install AMD ROCm version (skip menu) |
+| `--verbose` or `-v` | Show detailed installation output |
+| `--help` or `-h` | Show help message |
+
+**Examples:**
+
+```bash
+# Skip menu and install NVIDIA CUDA 12.1 directly
+python start.py --nvidia
+
+# Reinstall with fresh dependencies
+python start.py --reinstall
+
+# Upgrade to latest version (keeps your hardware selection)
+python start.py --upgrade
+
+# Install with verbose output for troubleshooting
+python start.py --reinstall --nvidia --verbose
+```
+
+#### Subsequent Runs
+
+After the first installation, simply run the launcher again to start the server:
+
+```bash
+# Windows
+start.bat
+
+# Linux/macOS
+./start.sh
+```
+
+The launcher detects the existing installation and starts the server directly without reinstalling.
+
+---
+
+### 📋 Manual Installation
+
+For users who prefer manual control over the installation process.
 
 **2. Create a Python Virtual Environment**
 
@@ -195,9 +376,9 @@ The `requirements.txt` file is specially crafted for CPU users. It tells `pip` t
 
 ---
 
-### **Option 2: NVIDIA GPU Installation (CUDA)**
+### **Option 2: NVIDIA GPU Installation (CUDA 12.1)**
 
-For users with NVIDIA GPUs. This provides the best performance.
+For users with NVIDIA GPUs. This provides the best performance for RTX 20/30/40 series.
 
 **Prerequisite:** Ensure you have the latest NVIDIA drivers installed.
 
@@ -216,6 +397,51 @@ If `CUDA available:` shows `True`, your setup is correct!
 <details>
 <summary><strong>💡 How This Works</strong></summary>
 The `requirements-nvidia.txt` file instructs `pip` to use PyTorch's official CUDA 12.1 package repository. It pins specific, compatible versions of `torch`, `torchvision`, and `torchaudio` that are built with CUDA support. This guarantees that the versions required by `chatterbox-tts` are met with the correct GPU-enabled libraries, preventing conflicts.
+</details>
+
+---
+
+### **Option 2b: NVIDIA GPU with CUDA 12.8 (RTX 5090 / Blackwell)**
+
+> **Note:** Only use this if you have an **RTX 5090** or other **Blackwell-based GPU**. For RTX 3000/4000 series, use Option 2 above.
+
+For users with the latest NVIDIA RTX 5090 or other Blackwell architecture GPUs that require CUDA 12.8 and sm_120 support.
+
+**Prerequisites:**
+- NVIDIA RTX 5090 or Blackwell-based GPU
+- CUDA 12.8+ drivers (driver version 570+)
+
+**Using Docker (Recommended for RTX 5090):**
+```bash
+# Build and start with CUDA 12.8 support
+docker compose -f docker-compose-cu128.yml up -d
+
+# Access the web UI at http://localhost:8004
+```
+
+**Manual Installation:**
+```bash
+# Make sure your (venv) is active
+pip install --upgrade pip
+pip install -r requirements-nvidia-cu128.txt
+pip install --no-deps git+https://github.com/devnen/chatterbox-v2.git@master
+```
+
+⚠️ **Critical:** The `--no-deps` flag is required to prevent PyTorch from being downgraded to a version that doesn't support Blackwell GPUs.
+
+**After installation, verify that PyTorch supports sm_120:**
+```bash
+python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0)}'); print(f'Architectures: {torch.cuda.get_arch_list()}')"
+```
+
+You should see `sm_120` in the architectures list!
+
+<details>
+<summary><strong>💡 Why CUDA 12.8?</strong></summary>
+
+The RTX 5090 uses NVIDIA's new **Blackwell architecture** with compute capability **sm_120**. PyTorch 2.8.0 with CUDA 12.8 is the first stable release that includes support for this architecture. Earlier versions (including CUDA 12.1) will fail with the error: `CUDA error: no kernel image is available for execution on the device`.
+
+See [README_CUDA128.md](README_CUDA128.md) for detailed setup instructions and troubleshooting.
 </details>
 
 ---
@@ -240,14 +466,14 @@ If `ROCm available:` shows `True`, your setup is correct!
 
 <details>
 <summary><strong>💡 How This Works</strong></summary>
-The `requirements-rocm.txt` file works just like the NVIDIA one, but it points `pip` to PyTorch's official ROCm 5.7 package repository. This ensures that the correct GPU-enabled libraries for AMD hardware are installed, providing a stable and performant environment.
+The `requirements-rocm.txt` file works just like the NVIDIA one, but it points `pip` to PyTorch's official ROCm 6.4.1 package repository. This ensures that the correct GPU-enabled libraries for AMD hardware are installed, providing a stable and performant environment.
 </details>
 
 ---
 
 ### **Option 4: Apple Silicon (MPS) Installation**
 
-For users with Apple Silicon Macs (M1, M2, M3, etc.).
+For users with Apple Silicon Macs (M1, M2, M3, M4, etc.).
 
 **Prerequisite:** Ensure you have macOS 12.3 or later for MPS support.
 
@@ -260,15 +486,15 @@ pip install torch torchvision torchaudio
 
 **Step 2: Configure the server to use MPS**
 Update your `config.yaml` to use MPS instead of CUDA:
-```bash
-# The server will create config.yaml on first run, or you can create it manually
-# Make sure the tts_engine device is set to 'mps'
+```yaml
+tts_engine:
+  device: mps  # Changed from 'cuda' to 'mps'
 ```
 
 **Step 3: Install remaining dependencies**
 ```bash
 # Install chatterbox-tts without its dependencies to avoid conflicts
-pip install --no-deps git+https://github.com/resemble-ai/chatterbox.git
+pip install --no-deps git+https://github.com/devnen/chatterbox-v2.git@master
 
 # Install core server dependencies
 pip install fastapi 'uvicorn[standard]' librosa safetensors soundfile pydub audiotsm praat-parselmouth python-multipart requests aiofiles PyYAML watchdog unidecode inflect tqdm
@@ -279,15 +505,8 @@ pip install conformer==0.3.2 diffusers==0.29.0 resemble-perth==1.0.1 transformer
 # Install s3tokenizer without its problematic dependencies
 pip install --no-deps s3tokenizer
 
-# Install a compatible version of ONNX
-pip install onnx==1.16.0
-```
-
-**Step 4: Configure MPS device**
-Either edit `config.yaml` manually or let the server create it, then modify:
-```yaml
-tts_engine:
-  device: mps  # Changed from 'cuda' to 'mps'
+# Install a compatible version of ONNX and audio codec
+pip install onnx==1.16.0 descript-audio-codec
 ```
 
 **After installation, verify that PyTorch can see your GPU:**
@@ -300,6 +519,7 @@ If `MPS available:` shows `True`, your setup is correct!
 <summary><strong>💡 Why This Process Is Different</strong></summary>
 Apple Silicon requires a specific installation sequence due to dependency conflicts between the pinned PyTorch versions in chatterbox-tts and the latest PyTorch versions that support MPS. By installing PyTorch first with MPS support, then carefully installing dependencies while avoiding version conflicts, we ensure MPS acceleration works properly. The server's automatic device detection will use MPS when configured and available.
 </details>
+```
 
 ---
 
@@ -367,6 +587,31 @@ The very first time you start the server, it needs to download the `chatterbox-t
 
 You can *optionally* use the `python download_model.py` script to pre-download specific model components to the `./model_cache` directory defined in `config.yaml`. However, please note that the runtime engine (`engine.py`) primarily loads the model from the main Hugging Face Hub cache directly, not this specific local `model_cache` directory.
 
+### Using the Automated Launcher (Recommended)
+
+The easiest way to run the server is using the automated launcher:
+
+**Windows:**
+```bash
+start.bat
+```
+
+**Linux / macOS:**
+```bash
+./start.sh
+```
+
+The launcher automatically:
+- Activates the virtual environment
+- Verifies the installation is complete
+- Starts the server
+- Waits for the server to be ready (including model download on first run)
+- Displays the access URLs when ready
+
+### Manual Server Start
+
+If you prefer to start the server manually:
+
 **Steps to Run:**
 
 1.  **Activate the virtual environment (if not activated):**
@@ -379,30 +624,84 @@ You can *optionally* use the `python download_model.py` script to pre-download s
 3.  **Access the UI:** After the server starts (and completes any initial model downloads), it should automatically attempt to open the Web UI in your default browser. If it doesn't, manually navigate to `http://localhost:PORT` (e.g., `http://localhost:8004` if your configured port is 8004).
 4.  **Access API Docs:** Open `http://localhost:PORT/docs` for interactive API documentation.
 5.  **Stop the server:** Press `CTRL+C` in the terminal where the server is running.
+```
 
 ## 🔄 Updating to the Latest Version
 
-Follow these steps to update your local installation to the latest version from GitHub. This guide provides two methods: the recommended `git stash` workflow and a manual backup alternative. Both will preserve your local `config.yaml`.
+Follow these steps to update your local installation to the latest version from GitHub. This guide provides multiple methods: using the automated launcher, the recommended `git stash` workflow, and a manual backup alternative. All methods preserve your local `config.yaml`.
 
-**First, Navigate to Your Project Directory & Activate Venv**
+**First, Navigate to Your Project Directory**
 
-Before starting, open your terminal, go to the project folder, and activate your virtual environment.
+Before starting, open your terminal and go to the project folder.
 
 ```bash
 cd Chatterbox-TTS-Server
+```
 
+---
+
+### **Method 1: Using the Automated Launcher (Easiest)**
+
+The launcher provides simple upgrade functionality that handles everything automatically.
+
+**Upgrade (keeps your hardware selection):**
+```bash
+# First, pull the latest code
+git pull origin main
+
+# Then upgrade dependencies using the launcher
+# Windows
+python start.py --upgrade
+
+# Linux/macOS
+python3 start.py --upgrade
+```
+
+**Full Reinstall (choose new hardware option):**
+```bash
+git pull origin main
+
+# Windows
+python start.py --reinstall
+
+# Linux/macOS
+python3 start.py --reinstall
+```
+
+The `--upgrade` flag preserves your current hardware selection (CPU, NVIDIA, etc.) and reinstalls dependencies.
+
+The `--reinstall` flag removes the existing installation completely and shows the hardware selection menu again.
+
+**Changing Hardware Configuration:**
+
+To switch to a different hardware configuration (e.g., from CPU to NVIDIA, or from CUDA 12.1 to CUDA 12.8):
+
+```bash
+# Shows menu to select new hardware
+python start.py --reinstall
+
+# Or specify directly
+python start.py --reinstall --nvidia
+python start.py --reinstall --nvidia-cu128
+python start.py --reinstall --cpu
+python start.py --reinstall --rocm
+```
+
+---
+
+### **Method 2: Stash and Pop (Recommended for Manual Installation)**
+
+If you installed manually without using the launcher, this is the standard and safest way to update using Git. It automatically handles your local changes (like to `config.yaml`) without needing to manually copy files.
+
+**First, activate your virtual environment:**
+
+```bash
 # On Windows (PowerShell):
 .\venv\Scripts\activate
 
 # On Linux (Bash):
 source venv/bin/activate
 ```
-
----
-
-### **Method 1: Stash and Pop (Recommended)**
-
-This is the standard and safest way to update using Git. It automatically handles your local changes (like to `config.yaml`) without needing to manually copy files.
 
 *   **Step 1: Stash Your Local Changes**
     This command safely stores your modifications on a temporary "shelf."
@@ -425,9 +724,19 @@ This is the standard and safest way to update using Git. It automatically handle
 
 ---
 
-### **Method 2: Manual Backup (Alternative)**
+### **Method 3: Manual Backup (Alternative)**
 
 This method involves manually backing up and restoring your configuration file.
+
+**First, activate your virtual environment:**
+
+```bash
+# On Windows (PowerShell):
+.\venv\Scripts\activate
+
+# On Linux (Bash):
+source venv/bin/activate
+```
 
 *   **Step 1: Backup Your Configuration**
     ⚠️ **Important:** Create a backup of your `config.yaml` to preserve your custom settings.
@@ -459,9 +768,9 @@ This method involves manually backing up and restoring your configuration file.
 
 ---
 
-### **Final Steps (For Both Methods)**
+### **Final Steps (For Methods 2 & 3)**
 
-After you have updated the code using either method, complete these final steps.
+After you have updated the code using Method 2 or 3, complete these final steps.
 
 **1. Check for New Configuration Options**
 
@@ -475,9 +784,14 @@ After you have updated the code using either method, complete these final steps.
     ```bash
     pip install -r requirements.txt
     ```
-*   **For NVIDIA GPU Systems:**
+*   **For NVIDIA GPU Systems (CUDA 12.1):**
     ```bash
     pip install -r requirements-nvidia.txt
+    ```
+*   **For NVIDIA GPU Systems (CUDA 12.8 / Blackwell):**
+    ```bash
+    pip install -r requirements-nvidia-cu128.txt
+    pip install --no-deps git+https://github.com/devnen/chatterbox-v2.git@master
     ```
 *   **For AMD GPU Systems:**
     ```bash
@@ -501,22 +815,41 @@ docker compose pull  # if using pre-built images
 docker compose up -d --build
 ```
 
+**For RTX 5090 / Blackwell GPUs:** Use the CUDA 12.8 configuration:
+```bash
+docker compose -f docker-compose-cu128.yml down
+docker compose -f docker-compose-cu128.yml pull
+docker compose -f docker-compose-cu128.yml up -d --build
+```
+
 ## 💡 Usage
 
 ### Web UI (`http://localhost:PORT`)
 
 The most intuitive way to use the server:
 
+*   **Engine Selector:** Use the dropdown at the top to switch between **Original Chatterbox** and **Chatterbox‑Turbo**. The backend auto-loads the selected engine.
 *   **Text Input:** Enter your plain text script. **For audiobooks:** Simply paste the entire book text - the chunking system will automatically handle long texts and create seamless audio output.   
 *   **Voice Mode:** Choose:
     *   `Predefined Voices`: Select a curated voice from the `./voices` directory.
     *   `Voice Cloning`: Select an uploaded reference file from `./reference_audio`.
-*   **Presets:** Load examples from `ui/presets.yaml`.
+*   **Presets:** Load examples from `ui/presets.yaml`. New presets demonstrate Turbo's paralinguistic tags.
 *   **Reference/Predefined Audio Management:** Import new files and refresh lists.
 *   **Generation Parameters:** Adjust Temperature, Exaggeration, CFG Weight, Speed Factor, Seed. Save defaults to `config.yaml`.
 *   **Chunking Controls:** Toggle "Split text into chunks" and adjust "Chunk Size" for long texts.
 *   **Server Configuration:** View/edit parts of `config.yaml` (requires server restart for some changes).
 *   **Audio Player:** Play generated audio with waveform visualization.
+
+### Using Paralinguistic Tags (Turbo)
+
+When the engine selector is set to **Chatterbox‑Turbo**, you can include paralinguistic tags inline:
+
+```
+Hi there [chuckle] — thanks for calling back.
+One moment… [cough] sorry about that. Let's get this fixed.
+```
+
+Turbo supports native tags like `[laugh]`, `[cough]`, and `[chuckle]` for more realistic, expressive speech. These tags are ignored when using Original Chatterbox.
 
 ### API Endpoints (`/docs` for interactive details)
 
@@ -623,16 +956,22 @@ docker compose -f docker-compose-rocm.yml exec chatterbox-tts-server python3 -c 
 
 ### 5. View Logs and Manage Container```bash
 # View logs
+
+```bash
 docker compose logs -f                                    # For NVIDIA
 docker compose -f docker-compose-rocm.yml logs -f         # For AMD
 docker compose -f docker-compose-cpu.yml logs -f          # For CPU
-
+```
 # Stop the container
+
+```bash
 docker compose down                                       # For NVIDIA
 docker compose -f docker-compose-rocm.yml down            # For AMD
 docker compose -f docker-compose-cpu.yml down             # For CPU
-
+```
 # Restart the container
+
+```bash
 docker compose restart chatterbox-tts-server              # For NVIDIA
 docker compose -f docker-compose-rocm.yml restart chatterbox-tts-server # For AMD
 docker compose -f docker-compose-cpu.yml restart chatterbox-tts-server # For CPU
@@ -677,38 +1016,117 @@ lspci | grep VGA
 *   **Performance:** AMD GPUs with ROCm provide excellent performance for ML workloads, with support for mixed-precision training.
 *   **PyTorch Version:** Uses PyTorch 2.6.0 with ROCm 6.4.1 for optimal compatibility and performance.
 
-## Troubleshooting
+## 🔍 Troubleshooting
 
-### **NVIDIA GPU Issues:**
-*   **GPU not detected:** Check `nvidia-smi` works on host, ensure Container Toolkit is installed
-*   **CDI device injection failed:** Open `docker-compose.yml`, comment out the `deploy` section, and uncomment the `runtime: nvidia` line as shown in the file's comments
-*   **CUDA out of memory:** Close other GPU applications, reduce `chunk_size` in the UI for long texts
+### Launcher Issues
 
-### **AMD ROCm Issues:**
-*   **GPU not detected:** 
-    - Ensure ROCm drivers are installed on host: `sudo apt install rocm-dkms rocm-libs`
-    - Verify your GPU is ROCm-compatible
-    - Check user groups: `groups $USER` should include `video` and `render`
-*   **Permission errors:** 
+*   **"Python not found" error:**
+    - Ensure Python 3.10+ is installed and added to PATH
+    - Windows: Reinstall Python and check "Add Python to PATH" during installation
+    - Linux: Install with `sudo apt install python3 python3-venv python3-pip`
+
+*   **"venv module not found" (Linux):**
     ```bash
-    sudo usermod -a -G video,render $USER
-    # Log out and back in
-    ```
-*   **Architecture not supported:** Use `HSA_OVERRIDE_GFX_VERSION` override as shown above
-*   **Still having issues:** Uncomment the "Enhanced ROCm Access" section in `docker-compose-rocm.yml`:
-    ```yaml
-    privileged: true
-    cap_add:
-      - SYS_PTRACE
-    devices:
-      - /dev/mem
+    sudo apt install python3-venv
     ```
 
-### **General Docker Issues:**
-*   **Port conflict:** Change `PORT` environment variable: `PORT=8005 docker compose up -d`
-*   **Build failures:** Ensure stable internet connection for downloading dependencies
-*   **Permission errors:** Check that Docker daemon is running and user is in `docker` group
-*   **Disk space:** Docker images and model cache can use several GB
+*   **Installation hangs or fails:**
+    - Run with verbose mode for details: `python start.py --reinstall --verbose`
+    - Check internet connection
+    - Ensure sufficient disk space (10GB+ recommended)
+
+*   **Permission errors removing venv (Windows):**
+    - Close all terminals and editors that might have files open in the venv folder
+    - Try running as Administrator
+    - Manually delete the venv folder: `rmdir /s /q venv`
+
+*   **Wrong hardware detected:**
+    - The launcher detects NVIDIA GPUs via `nvidia-smi` and AMD GPUs via `rocm-smi`
+    - If detection fails, use direct installation flags: `--cpu`, `--nvidia`, `--nvidia-cu128`, `--rocm`
+
+*   **Checking installation type:**
+    ```bash
+    # The installation type is stored in venv/.install_type
+    cat venv/.install_type  # Linux/macOS
+    type venv\.install_type  # Windows
+    ```
+
+### Apple Silicon (MPS) Issues
+
+*   **MPS Not Available:** Ensure you have macOS 12.3+ and an Apple Silicon Mac. Verify with `python -c "import torch; print(torch.backends.mps.is_available())"`
+*   **Installation Conflicts:** If you encounter version conflicts, follow the exact Apple Silicon installation sequence in Option 4, installing PyTorch first before other dependencies.
+*   **ONNX Build Errors:** Use the specific ONNX version `pip install onnx==1.16.0` as shown in the installation steps.
+*   **Model Loading Errors:** Ensure `config.yaml` has `device: mps` in the `tts_engine` section.
+
+### NVIDIA GPU Issues
+
+*   **CUDA Not Available / Slow:** Check NVIDIA drivers (`nvidia-smi`), ensure correct CUDA-enabled PyTorch is installed (see Installation options).
+*   **"No kernel image available" error:**
+    - For RTX 5090/Blackwell: Use `--nvidia-cu128` or `requirements-nvidia-cu128.txt` instead of standard NVIDIA installation
+    - For older GPUs (RTX 20/30/40): Use `--nvidia` or `requirements-nvidia.txt`
+*   **VRAM Out of Memory (OOM):**
+    *   Ensure your GPU meets minimum requirements for Chatterbox.
+    *   Close other GPU-intensive applications.
+    *   If processing very long text even with chunking, try reducing `chunk_size` (e.g., 100-150).
+
+### AMD GPU Issues
+
+*   **ROCm not working on Windows:**
+    - ROCm only supports Linux - use CPU mode on Windows with AMD GPUs
+    - The launcher will warn you if you select ROCm on Windows
+
+### General Issues
+
+*   **Import Errors (e.g., `chatterbox-tts`, `librosa`):** Ensure virtual environment is active and dependencies installed successfully. Try reinstalling: `python start.py --reinstall`
+*   **`libsndfile` Error (Linux):** Run `sudo apt install libsndfile1`.
+*   **Model Download Fails:** Check internet connection. `ChatterboxTTS.from_pretrained()` will attempt to download from Hugging Face Hub. Ensure `model.repo_id` in `config.yaml` is correct.
+*   **Voice Cloning/Predefined Voice Issues:**
+    *   Ensure files exist in the correct directories (`./reference_audio`, `./voices`).
+    *   Check server logs for errors related to file loading or processing.
+*   **Permission Errors (Saving Files/Config):** Check write permissions for `./config.yaml`, `./logs`, `./outputs`, `./reference_audio`, `./voices`, and the Hugging Face cache directory if using Docker volumes.
+*   **UI Issues / Settings Not Saving:** Clear browser cache/local storage. Check browser developer console (F12) for JavaScript errors. Ensure `config.yaml` is writable by the server process.
+*   **Port Conflict (`Address already in use`):** Another process is using the port. Stop it or change `server.port` in `config.yaml` (requires server restart).
+    - Find process using port: `netstat -ano | findstr :8004` (Windows) or `lsof -i :8004` (Linux)
+*   **Generation Cancel Button:** This is a "UI Cancel" - it stops the *frontend* from waiting but doesn't instantly halt ongoing backend model inference. Clicking Generate again cancels the previous UI wait.
+
+### Selecting GPUs on Multi-GPU Systems
+
+Set the `CUDA_VISIBLE_DEVICES` environment variable **before** running `python server.py` (or before running the launcher) to specify which GPU(s) PyTorch should see. The server uses the first visible one (effectively `cuda:0` from PyTorch's perspective).
+
+*   **Example (Use only physical GPU 1):**
+    *   Linux/macOS: `CUDA_VISIBLE_DEVICES="1" python server.py`
+    *   Windows CMD: `set CUDA_VISIBLE_DEVICES=1 && python server.py`
+    *   Windows PowerShell: `$env:CUDA_VISIBLE_DEVICES="1"; python server.py`
+
+*   **Example (Use physical GPUs 6 and 7 - server uses GPU 6):**
+    *   Linux/macOS: `CUDA_VISIBLE_DEVICES="6,7" python server.py`
+    *   Windows CMD: `set CUDA_VISIBLE_DEVICES=6,7 && python server.py`
+    *   Windows PowerShell: `$env:CUDA_VISIBLE_DEVICES="6,7"; python server.py`
+
+**Note:** `CUDA_VISIBLE_DEVICES` selects GPUs; it does **not** fix OOM errors if the chosen GPU lacks sufficient memory.
+
+### Verification Commands
+
+**Check Python version:**
+```bash
+python --version
+```
+
+**Check PyTorch and CUDA:**
+```bash
+python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {torch.cuda.is_available()}')"
+```
+
+**Check PyTorch architectures (for Blackwell support):**
+```bash
+python -c "import torch; print(torch.cuda.get_arch_list())"
+```
+
+**Test server manually:**
+```bash
+# Activate venv first, then:
+python server.py
+```
 
 ## Configuration in Docker
 
@@ -830,7 +1248,7 @@ You can find it here: [https://opensource.org/licenses/MIT](https://opensource.o
 
 *   **Core Model:** This project utilizes the **[Chatterbox TTS model](https://github.com/resemble-ai/chatterbox)** by **[Resemble AI](https://www.resemble.ai/)**.
 *   **UI Inspiration:** Special thanks to **[Lex-au](https://github.com/Lex-au)** whose **[Orpheus-FastAPI](https://github.com/Lex-au/Orpheus-FastAPI)** project served as inspiration for the web interface design.
-*   **Similar Project:** This server shares architectural similarities with our [Dia-TTS-Server](https://github.com/devnen/Dia-TTS-Server) project, which uses a different TTS engine.
+*   **Similar Project:** This server shares architectural similarities with our [Dia-TTS-Server](https://github.com/devnen/Dia-TTS-Server) and [Kitten-TTS-Server](https://github.com/devnen/Kitten-TTS-Server) projects, which use different TTS engines.
 *   **Containerization Technologies:** [Docker](https://www.docker.com/) and [NVIDIA Container Toolkit](https://github.com/NVIDIA/nvidia-docker).
 *   **Core Libraries:**
     *   [FastAPI](https://fastapi.tiangolo.com/)
@@ -841,4 +1259,3 @@ You can find it here: [https://opensource.org/licenses/MIT](https://opensource.o
     *   [SoundFile](https://python-soundfile.readthedocs.io/) & [libsndfile](http://www.mega-nerd.com/libsndfile/)
     *   [Jinja2](https://jinja.palletsprojects.com/)
     *   [WaveSurfer.js](https://wavesurfer.xyz/)
-    *   [Tailwind CSS](https://tailwindcss.com/) (via CDN)

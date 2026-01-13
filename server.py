@@ -247,6 +247,146 @@ templates = Jinja2Templates(directory=str(ui_static_path))
 
 # --- API Endpoints ---
 
+# --- Audio Stitching Helper Functions ---
+# These functions support smart audio chunk concatenation with crossfading
+
+
+def _generate_equal_power_curves(n_samples: int):
+    """
+    Generate equal-power crossfade curves using cos²/sin² functions.
+    These curves maintain perceptually constant loudness during transitions.
+
+    Args:
+        n_samples: Number of samples in the fade region
+
+    Returns:
+        Tuple of (fade_out, fade_in) numpy arrays
+    """
+    t = np.linspace(0, np.pi / 2, n_samples, dtype=np.float32)
+    fade_out = np.cos(t) ** 2  # 1 → 0
+    fade_in = np.sin(t) ** 2  # 0 → 1
+    return fade_out, fade_in
+
+
+def _crossfade_with_overlap(
+    chunk_a: np.ndarray, chunk_b: np.ndarray, fade_samples: int
+) -> np.ndarray:
+    """
+    Perform true crossfade by overlapping and summing audio regions.
+
+    This creates a seamless transition by:
+    1. Taking the tail of chunk_a and head of chunk_b
+    2. Applying equal-power fade curves
+    3. Summing the overlapped regions
+
+    Result length = len(chunk_a) + len(chunk_b) - fade_samples
+
+    Args:
+        chunk_a: First audio chunk (numpy float32 array)
+        chunk_b: Second audio chunk (numpy float32 array)
+        fade_samples: Number of samples to overlap
+
+    Returns:
+        Crossfaded audio as numpy float32 array
+    """
+    # Handle edge cases
+    fade_samples = min(fade_samples, len(chunk_a), len(chunk_b))
+    if fade_samples <= 0:
+        return np.concatenate([chunk_a, chunk_b])
+
+    fade_out, fade_in = _generate_equal_power_curves(fade_samples)
+
+    # Extract overlap regions
+    a_tail = chunk_a[-fade_samples:]
+    b_head = chunk_b[:fade_samples]
+
+    # Crossfade: weighted sum of overlapping regions
+    crossfaded_region = (a_tail * fade_out) + (b_head * fade_in)
+
+    # Assemble: [chunk_a without tail] + [crossfaded region] + [chunk_b without head]
+    return np.concatenate(
+        [chunk_a[:-fade_samples], crossfaded_region, chunk_b[fade_samples:]]
+    )
+
+
+def _apply_edge_fades(
+    chunk: np.ndarray, fade_samples: int, fade_in: bool = True, fade_out: bool = True
+) -> np.ndarray:
+    """
+    Apply minimal linear edge fades for click protection.
+
+    This is used in fallback mode when full crossfading is disabled.
+    Linear fades are acceptable for ultra-short safety fades (2-3ms).
+
+    Args:
+        chunk: Audio chunk (numpy array)
+        fade_samples: Number of samples to fade
+        fade_in: Whether to apply fade-in at start
+        fade_out: Whether to apply fade-out at end
+
+    Returns:
+        Audio chunk with edge fades applied (numpy float32 array)
+    """
+    # Skip if chunk is too short for fading
+    if len(chunk) < fade_samples * 2:
+        return chunk.astype(np.float32, copy=False)
+
+    result = chunk.astype(np.float32, copy=True)
+
+    if fade_in:
+        result[:fade_samples] *= np.linspace(0, 1, fade_samples, dtype=np.float32)
+    if fade_out:
+        result[-fade_samples:] *= np.linspace(1, 0, fade_samples, dtype=np.float32)
+
+    return result
+
+
+def _remove_dc_offset(
+    audio: np.ndarray, sample_rate: int, cutoff_hz: float = 15.0
+) -> np.ndarray:
+    """
+    Remove DC offset using a high-pass Butterworth filter.
+
+    DC offset can cause low-frequency thumps when concatenating audio chunks.
+    This applies a 2nd-order high-pass filter at the specified cutoff frequency.
+
+    Args:
+        audio: Audio data (numpy array)
+        sample_rate: Sample rate in Hz
+        cutoff_hz: High-pass filter cutoff frequency (default 15 Hz)
+
+    Returns:
+        Audio with DC offset removed (numpy float32 array)
+
+    Note:
+        Requires scipy. If scipy is not available, returns audio unchanged
+        with a warning logged.
+    """
+    try:
+        from scipy.signal import butter, filtfilt
+
+        nyquist = sample_rate / 2
+        normalized_cutoff = cutoff_hz / nyquist
+
+        # 2nd-order Butterworth high-pass filter
+        b, a = butter(2, normalized_cutoff, btype="high")
+
+        # Zero-phase filtering (no phase distortion)
+        return filtfilt(b, a, audio).astype(np.float32)
+
+    except ImportError:
+        logger.warning(
+            "scipy not available for DC offset removal. "
+            "Install scipy to enable this feature: pip install scipy"
+        )
+        return audio.astype(np.float32, copy=False)
+    except Exception as e:
+        logger.error(f"DC offset removal failed: {e}")
+        return audio.astype(np.float32, copy=False)
+
+
+# --- End Audio Stitching Helper Functions ---
+
 
 # --- Main UI Route ---
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -264,18 +404,41 @@ async def get_web_ui(request: Request):
         )
 
 
+# --- API Endpoint for Model Information ---
+@app.get("/api/model-info", tags=["Model Information"])
+async def get_model_info_endpoint():
+    """
+    Returns detailed information about the currently loaded TTS model.
+    This endpoint is used by the UI to display model status and
+    conditionally show features like paralinguistic tags.
+    """
+    logger.debug("Request received for /api/model-info")
+    try:
+        model_info = engine.get_model_info()
+        return model_info
+    except Exception as e:
+        logger.error(f"Error getting model info: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail="Failed to retrieve model information"
+        )
+
+
 # --- API Endpoint for Initial UI Data ---
 @app.get("/api/ui/initial-data", tags=["UI Helpers"])
 async def get_ui_initial_data():
     """
     Provides all necessary initial data for the UI to render,
-    including configuration, file lists, and presets.
+    including configuration, file lists, presets, and model information.
     """
     logger.info("Request received for /api/ui/initial-data.")
     try:
         full_config = get_full_config_for_template()
         reference_files = utils.get_valid_reference_files()
         predefined_voices = utils.get_predefined_voices()
+
+        # Get model information for UI
+        model_info = engine.get_model_info()
+
         loaded_presets = []
         presets_file = ui_static_path / "presets.yaml"
         if presets_file.exists():
@@ -307,6 +470,7 @@ async def get_ui_initial_data():
             "predefined_voices": predefined_voices,
             "presets": loaded_presets,
             "initial_gen_result": initial_gen_result_placeholder,
+            "model_info": model_info,  # NEW: Include model information
         }
     except Exception as e:
         logger.error(f"Error preparing initial UI data for API: {e}", exc_info=True)
@@ -387,15 +551,38 @@ async def reset_settings_endpoint():
     "/restart_server", response_model=UpdateStatusResponse, tags=["Configuration"]
 )
 async def restart_server_endpoint():
-    """Attempts to trigger a server restart."""
-    logger.info("Request received for /restart_server.")
-    message = (
-        "Server restart initiated. If running locally without a process manager, "
-        "you may need to restart manually. For managed environments (Docker, systemd), "
-        "the manager should handle the restart."
-    )
-    logger.warning(message)
-    return UpdateStatusResponse(message=message, restart_needed=True)
+    """
+    Triggers a hot-swap of the TTS model engine.
+    Unloads the current model, clears VRAM, and loads the model defined in config.
+    """
+    logger.info("Request received for /restart_server (Model Hot-Swap).")
+
+    try:
+        # Attempt to reload the engine with the new configuration
+        success = engine.reload_model()
+
+        if success:
+            model_info = engine.get_model_info()
+            new_model_name = model_info.get("class_name", "Unknown Model")
+            new_model_type = model_info.get("type", "unknown")
+            message = f"Model hot-swap successful. Now running: {new_model_name} ({new_model_type})"
+            logger.info(message)
+
+            # restart_needed=False because we just performed the hot-swap successfully
+            return UpdateStatusResponse(message=message, restart_needed=False)
+        else:
+            error_msg = "Model reload failed. The server may be in an inconsistent state. Check logs for details."
+            logger.error(error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Critical error during model hot-swap: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error during model reload: {str(e)}",
+        )
 
 
 # --- UI Helper API Endpoints ---
@@ -813,23 +1000,123 @@ async def custom_tts_endpoint(
         raise HTTPException(
             status_code=500, detail="Failed to determine engine sample rate."
         )
-
     try:
-        # ### MODIFICATION START ###
-        # First, concatenate all raw chunks into a single audio clip.
-        final_audio_np = (
-            np.concatenate(all_audio_segments_np)
-            if len(all_audio_segments_np) > 1
-            else all_audio_segments_np[0]
-        )
-        perf_monitor.record("All audio chunks processed and concatenated")
+        # ### SMART AUDIO STITCHING ###
+        # Local constants - adjust these values to tune stitching behavior
+        SENTENCE_PAUSE_MS = 200  # Desired audible silence between sentences
+        CROSSFADE_MS = 20  # Crossfade duration for smart mode (10-50ms recommended)
+        SAFETY_FADE_MS = 3  # Minimal edge fade for fallback mode (2-5ms)
+        ENABLE_DC_REMOVAL = False  # Set True if you hear low-frequency thumps
+        DC_HIGHPASS_HZ = 15  # High-pass cutoff for DC removal
+        PEAK_NORMALIZE_THRESHOLD = 0.99  # Normalize if peak exceeds this
+        PEAK_NORMALIZE_TARGET = 0.95  # Target peak after normalization
 
-        # Now, apply all audio processing to the COMPLETE audio clip.
+        # Read smart stitching toggle from config (defaults to True)
+        enable_smart_stitching = config_manager.get_bool(
+            "audio_processing.enable_crossfade", True
+        )
+
+        # --- Sample rate validation ---
+        if not engine_output_sample_rate or engine_output_sample_rate <= 0:
+            logger.error(
+                f"Invalid sample rate: {engine_output_sample_rate}, "
+                "falling back to raw concatenation"
+            )
+            final_audio_np = (
+                np.concatenate(all_audio_segments_np)
+                if len(all_audio_segments_np) > 1
+                else all_audio_segments_np[0]
+            )
+
+        elif len(all_audio_segments_np) == 1:
+            # Single chunk - no stitching needed
+            final_audio_np = all_audio_segments_np[0]
+            logger.info("Single audio chunk - no stitching required")
+
+        elif enable_smart_stitching:
+            # --- Smart mode: true crossfading with silence insertion ---
+            fade_samples = int(CROSSFADE_MS / 1000 * engine_output_sample_rate)
+
+            # Calculate silence buffer with compensation for crossfade overlap
+            # Each crossfade removes fade_samples from silence (one at each end)
+            desired_silence_samples = int(
+                SENTENCE_PAUSE_MS / 1000 * engine_output_sample_rate
+            )
+            silence_buffer_samples = desired_silence_samples + (fade_samples * 2)
+
+            # Preprocess chunks: convert to float32 and optionally remove DC offset
+            chunks = []
+            for chunk in all_audio_segments_np:
+                processed = chunk.astype(np.float32, copy=True)
+                if ENABLE_DC_REMOVAL:
+                    processed = _remove_dc_offset(
+                        processed, engine_output_sample_rate, DC_HIGHPASS_HZ
+                    )
+                chunks.append(processed)
+
+            # Start with first chunk
+            result = chunks[0]
+
+            # Stitch remaining chunks with crossfaded silence gaps
+            for i in range(1, len(chunks)):
+                # Create silence buffer (oversized to compensate for crossfade overlap)
+                silence = np.zeros(silence_buffer_samples, dtype=np.float32)
+
+                # Crossfade: current result → silence (speech fades into silence)
+                result = _crossfade_with_overlap(result, silence, fade_samples)
+
+                # Crossfade: result → next chunk (silence fades into speech)
+                result = _crossfade_with_overlap(result, chunks[i], fade_samples)
+
+            final_audio_np = result
+            logger.info(
+                f"Smart stitching applied: {len(chunks)} chunks, "
+                f"{CROSSFADE_MS}ms crossfades, {SENTENCE_PAUSE_MS}ms pauses"
+            )
+
+        else:
+            # --- Fallback mode: minimal safety edge fades, no silence ---
+            fade_samples = int(SAFETY_FADE_MS / 1000 * engine_output_sample_rate)
+            num_chunks = len(all_audio_segments_np)
+
+            processed_chunks = []
+            for i, chunk in enumerate(all_audio_segments_np):
+                is_first = i == 0
+                is_last = i == num_chunks - 1
+
+                processed = _apply_edge_fades(
+                    chunk,
+                    fade_samples,
+                    fade_in=(not is_first),  # No fade-in on first chunk
+                    fade_out=(not is_last),  # No fade-out on last chunk
+                )
+                processed_chunks.append(processed)
+
+            final_audio_np = np.concatenate(processed_chunks)
+            logger.info(
+                f"Safety edge fades applied: {num_chunks} chunks, "
+                f"{SAFETY_FADE_MS}ms linear fades"
+            )
+
+        # --- Ensure float32 dtype for all code paths ---
+        final_audio_np = final_audio_np.astype(np.float32, copy=False)
+
+        # --- Normalize to prevent clipping ---
+        peak_amplitude = np.abs(final_audio_np).max()
+        if peak_amplitude > PEAK_NORMALIZE_THRESHOLD:
+            final_audio_np = final_audio_np * (PEAK_NORMALIZE_TARGET / peak_amplitude)
+            logger.warning(
+                f"Audio normalized to prevent clipping (peak was {peak_amplitude:.3f})"
+            )
+
+        perf_monitor.record("Audio chunks stitched")
+
+        # --- Global Audio Post-Processing (applied to complete stitched audio) ---
         if config_manager.get_bool("audio_processing.enable_silence_trimming", False):
             final_audio_np = utils.trim_lead_trail_silence(
                 final_audio_np, engine_output_sample_rate
             )
-            perf_monitor.record(f"Global silence trim applied")
+            perf_monitor.record("Global silence trim applied")
 
         if config_manager.get_bool(
             "audio_processing.enable_internal_silence_fix", False
@@ -837,7 +1124,7 @@ async def custom_tts_endpoint(
             final_audio_np = utils.fix_internal_silence(
                 final_audio_np, engine_output_sample_rate
             )
-            perf_monitor.record(f"Global internal silence fix applied")
+            perf_monitor.record("Global internal silence fix applied")
 
         if (
             config_manager.get_bool("audio_processing.enable_unvoiced_removal", False)
@@ -846,15 +1133,24 @@ async def custom_tts_endpoint(
             final_audio_np = utils.remove_long_unvoiced_segments(
                 final_audio_np, engine_output_sample_rate
             )
-            perf_monitor.record(f"Global unvoiced removal applied")
-        # ### MODIFICATION END ###
+            perf_monitor.record("Global unvoiced removal applied")
+
+        # --- Warn about potentially conflicting settings ---
+        if enable_smart_stitching and config_manager.get_bool(
+            "audio_processing.enable_silence_trimming", False
+        ):
+            logger.warning(
+                "Smart stitching adds sentence pauses, but silence trimming is enabled. "
+                "Leading/trailing pauses may be removed."
+            )
+        # ### SMART AUDIO STITCHING END ###
 
     except ValueError as e_concat:
-        logger.error(f"Audio concatenation failed: {e_concat}", exc_info=True)
+        logger.error(f"Audio concatenation/stitching failed: {e_concat}", exc_info=True)
         for idx, seg in enumerate(all_audio_segments_np):
             logger.error(f"Segment {idx} shape: {seg.shape}, dtype: {seg.dtype}")
         raise HTTPException(
-            status_code=500, detail=f"Audio concatenation error: {e_concat}"
+            status_code=500, detail=f"Audio stitching error: {e_concat}"
         )
 
     output_format_str = (
@@ -892,6 +1188,31 @@ async def custom_tts_endpoint(
         f"Successfully generated audio: {download_filename}, {len(encoded_audio_bytes)} bytes, type {media_type}."
     )
     logger.debug(perf_monitor.report())
+
+    # Optional: Save to disk if enabled
+    if config_manager.get_bool("audio_output.save_to_disk", False):
+        output_dir = get_output_path(ensure_absolute=True)
+        output_file_path = output_dir / download_filename
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            with open(output_file_path, "wb") as f:
+                f.write(encoded_audio_bytes)
+            if not output_file_path.exists() or output_file_path.stat().st_size < 100:
+                logger.error(f"File save verification failed for {output_file_path}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to save audio file to {output_file_path}",
+                )
+            logger.info(f"Audio saved to disk: {output_file_path}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(
+                f"Failed to save audio to {output_file_path}: {e}", exc_info=True
+            )
+            raise HTTPException(
+                status_code=500, detail=f"Failed to save audio file: {e}"
+            )
 
     return StreamingResponse(
         io.BytesIO(encoded_audio_bytes), media_type=media_type, headers=headers
@@ -967,6 +1288,40 @@ async def openai_speech_endpoint(request: OpenAISpeechRequest):
 
         # Determine the media type
         media_type = f"audio/{request.response_format}"
+
+        # Optional: Save to disk if enabled
+        if config_manager.get_bool("audio_output.save_to_disk", False):
+            output_dir = get_output_path(ensure_absolute=True)
+            timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+            download_filename = f"openai_tts_{timestamp_str}.{request.response_format}"
+            output_file_path = output_dir / download_filename
+            try:
+                output_dir.mkdir(parents=True, exist_ok=True)
+                with open(output_file_path, "wb") as f:
+                    f.write(encoded_audio)
+                if (
+                    not output_file_path.exists()
+                    or output_file_path.stat().st_size < 100
+                ):
+                    logger.error(
+                        f"File save verification failed for {output_file_path}"
+                    )
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to save audio file to {output_file_path}",
+                    )
+                logger.info(
+                    f"OpenAI-compatible audio saved to disk: {output_file_path}"
+                )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(
+                    f"Failed to save audio to {output_file_path}: {e}", exc_info=True
+                )
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to save audio file: {e}"
+                )
 
         # Return the streaming response
         return StreamingResponse(io.BytesIO(encoded_audio), media_type=media_type)
