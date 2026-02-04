@@ -1187,14 +1187,23 @@ debug:
   max_generation_retries: 2             # Maximum retry attempts on failure
   fallback_to_cpu_on_cuda_error: true   # Auto-fallback to CPU on persistent CUDA errors
   verbose_error_logging: true           # Enable detailed error diagnostics
+  force_cuda_debugging_mode: false      # Force enable all CUDA debugging options (for advanced troubleshooting)
 ```
 
+**Advanced Debugging Features (New in v2.1.0+):**
+- **Enhanced Device-Side Assertion Detection:** Proactive detection of CUDA assertion states before generation
+- **CUDA Device Reset:** Automatic device reset attempts when device-side assertions are detected
+- **Comprehensive Error Recovery:** Multiple recovery strategies including cache clearing, device reset, and CPU fallback
+- **Force Debug Mode:** Set `force_cuda_debugging_mode: true` to enable all CUDA debugging options including `CUDA_LAUNCH_BLOCKING`, `TORCH_USE_CUDA_DSA`, and `TORCH_SHOW_CPP_STACKTRACES`
+
 **Manual Troubleshooting Steps:**
-1. **Update your installation:** Ensure you have the latest version with CUDA error handling
+1. **Update your installation:** Ensure you have the latest version with enhanced CUDA error handling
 2. **Enable detailed debugging:** Set `cuda_launch_blocking: true` in config.yaml for better error tracking
-3. **Check GPU memory:** Close other GPU applications and restart the server
-4. **Try CPU mode:** Set `device: cpu` in config.yaml to test if the issue is GPU-specific
-5. **Verify dependencies:** Ensure PyTorch and CUDA versions are compatible
+3. **Force debugging mode:** For persistent issues, set `force_cuda_debugging_mode: true` to enable comprehensive CUDA diagnostics
+4. **Check GPU memory:** Close other GPU applications and restart the server
+5. **Try CPU mode:** Set `device: cpu` in config.yaml to test if the issue is GPU-specific
+6. **Verify dependencies:** Ensure PyTorch and CUDA versions are compatible
+7. **Monitor logs:** Check the server logs for device-side assertion recovery attempts and fallback actions
 
 ### General CUDA Issues
 

@@ -108,6 +108,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "max_generation_retries": 2,  # Maximum number of generation retries on failure
         "fallback_to_cpu_on_cuda_error": True,  # Automatically fallback to CPU if CUDA fails
         "verbose_error_logging": True,  # Enable detailed error logging and diagnostics
+        "force_cuda_debugging_mode": False,  # Force enable all CUDA debugging options for troubleshooting
     },
 }
 

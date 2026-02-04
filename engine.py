@@ -112,9 +112,23 @@ def _setup_cuda_debugging():
     """
     Sets up CUDA debugging environment if enabled in configuration.
     """
-    if config_manager.get_bool("debug.cuda_launch_blocking", False):
+    force_debug = config_manager.get_bool("debug.force_cuda_debugging_mode", False)
+    
+    if config_manager.get_bool("debug.cuda_launch_blocking", False) or force_debug:
         os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
         logger.info("CUDA_LAUNCH_BLOCKING enabled for better error tracking")
+    
+    # Enable CUDA device-side assertions for better debugging
+    if config_manager.get_bool("debug.verbose_error_logging", True) or force_debug:
+        os.environ["TORCH_USE_CUDA_DSA"] = "1"
+        logger.info("TORCH_USE_CUDA_DSA enabled for device-side assertion debugging")
+    
+    # Enable additional debug environment variables when in force debug mode
+    if force_debug:
+        os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+        os.environ["TORCH_USE_CUDA_DSA"] = "1" 
+        os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
+        logger.info("Force CUDA debugging mode enabled - all CUDA debug options activated")
     
     if config_manager.get_bool("debug.verbose_error_logging", True):
         # Enable additional CUDA error context
@@ -146,6 +160,49 @@ def _clear_cuda_cache():
             logger.warning(f"CUDA cache clearing failed: {e}")
     except Exception as e:
         logger.warning(f"Unexpected error clearing CUDA cache: {e}")
+
+
+def _reset_cuda_device():
+    """
+    Attempts to reset CUDA device state to recover from device-side assertions.
+    This is more aggressive than cache clearing and should be used for serious errors.
+    """
+    if not torch.cuda.is_available():
+        return False
+    
+    try:
+        # Try to reset the current device
+        current_device = torch.cuda.current_device()
+        logger.info(f"Attempting to reset CUDA device {current_device}")
+        
+        # Clear all cached memory
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+        
+        # Reset memory allocator statistics
+        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.reset_accumulated_memory_stats()
+        
+        # Synchronize to flush any pending operations
+        torch.cuda.synchronize()
+        
+        # Test basic functionality after reset
+        test_tensor = torch.tensor([1.0], device='cuda')
+        test_tensor.cpu()
+        
+        logger.info("CUDA device reset successful")
+        return True
+        
+    except RuntimeError as e:
+        error_str = str(e).lower()
+        if "device-side assert" in error_str or "assertion" in error_str:
+            logger.error("CUDA device reset failed - device-side assertion persists")
+        else:
+            logger.warning(f"CUDA device reset failed: {e}")
+        return False
+    except Exception as e:
+        logger.warning(f"Unexpected error during CUDA device reset: {e}")
+        return False
 
 
 def _validate_generation_inputs(text: str, audio_prompt_path: Optional[str]) -> bool:
@@ -217,6 +274,24 @@ def _validate_cuda_state() -> bool:
         test_tensor = torch.tensor([1.0], device='cuda')
         test_result = test_tensor + 1.0
         test_result.cpu()  # Move back to CPU
+        
+        # Additional device-side assertion prevention checks
+        # Test tensor comparison operations that commonly trigger assertions
+        try:
+            test_comparison = (test_tensor == 1.0)
+            test_view = test_tensor.view(-1) 
+            test_comparison_view = (test_view == 1.0)
+            # Move results to CPU to complete the operation safely
+            test_comparison.cpu()
+            test_comparison_view.cpu()
+        except RuntimeError as comparison_error:
+            error_str = str(comparison_error).lower()
+            if "device-side assert" in error_str or "assertion" in error_str:
+                logger.error("CUDA device-side assertion detected during comparison validation")
+                return False
+            else:
+                logger.warning(f"CUDA comparison validation failed: {comparison_error}")
+        
         return True
     except RuntimeError as e:
         error_str = str(e).lower()
@@ -251,17 +326,15 @@ def _handle_cuda_error(error: Exception, retry_count: int) -> bool:
         if config_manager.get_bool("debug.enable_cuda_error_recovery", True):
             logger.info("Attempting CUDA error recovery for device-side assertion...")
             
-            # For device-side assertions, we cannot safely use most CUDA operations
-            # Try safe cache clearing first
-            _clear_cuda_cache()
-            
-            # Skip CUDA synchronization if it's likely to fail due to assertion state
-            # Device-side assertions often leave CUDA in an unrecoverable state
-            logger.warning("Device-side assertion detected - CUDA device may be in unstable state")
-            
-            # For device-side assertions, be more conservative with retries
-            max_retries = max(1, config_manager.get_int("debug.max_generation_retries", 2) // 2)
-            return retry_count < max_retries
+            # For device-side assertions, try more aggressive recovery
+            if _reset_cuda_device():
+                logger.info("CUDA device reset successful - may retry generation")
+                # For device-side assertions, be more conservative with retries
+                max_retries = max(1, config_manager.get_int("debug.max_generation_retries", 2) // 2)
+                return retry_count < max_retries
+            else:
+                logger.error("CUDA device reset failed - device-side assertion recovery not possible")
+                return False
     
     # Check for CUDA out of memory errors
     elif "out of memory" in error_str or "cuda oom" in error_str:
